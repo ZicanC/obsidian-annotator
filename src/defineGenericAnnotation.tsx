@@ -7,7 +7,7 @@ import { deleteAnnotation, loadAnnotations, writeAnnotation } from 'annotationFi
 import { Annotation } from './types';
 import AnnotatorPlugin from 'main';
 import { checkPseudoAnnotationEquality, getAnnotationHighlightTextData } from 'annotationUtils';
-import { MarkdownRenderer, normalizePath, TFile, TAbstractFile, Vault } from 'obsidian';
+import { MarkdownRenderer, normalizePath, Platform, TFile, TAbstractFile, Vault } from 'obsidian';
 import { DarkReaderType } from 'darkreader';
 import { getSubtitles } from 'youtube-captions-scraper';
 import getYouTubeMetaData from 'youtube-metadata-scraper';
@@ -299,17 +299,7 @@ export default (vault: Vault, plugin: AnnotatorPlugin) => {
                     }
                     if (url.protocol == 'file:') {
                         try {
-                            buf = await new Promise(res => {
-                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                (window as any).app.vault.adapter.fs.readFile(
-                                    (x => (x.contains(':/') ? x.substr(1) : x))(
-                                        decodeURI(url.pathname).replaceAll('\\', '/')
-                                    ),
-                                    (_, buf) => {
-                                        res(buf);
-                                    }
-                                );
-                            });
+                            buf = await readFromFileUrl(url);
 
                             return new Response(buf, {
                                 status: 200,
@@ -721,6 +711,32 @@ function getAbstractFileByPath(path: string, vault: Vault): TFile {
 async function readFromVaultPath(path: string, vault: Vault): Promise<ArrayBuffer> {
     const abstractFile = getAbstractFileByPath(path, vault);
     return await vault.readBinary(abstractFile);
+}
+
+async function readFromFileUrl(url: URL): Promise<unknown> {
+    if (!Platform.isDesktop) {
+        throw new Error('External file URLs are only supported on desktop');
+    }
+
+    const requireFn = (window as Window & { require?: (id: string) => unknown }).require;
+    if (!requireFn) {
+        throw new Error('Desktop file access is unavailable');
+    }
+
+    const fs = requireFn('fs') as {
+        readFile: (path: string, callback: (error: Error | null, data: unknown) => void) => void;
+    };
+    const filePath = decodeURI(url.pathname).replaceAll('\\', '/').replace(/^\/([A-Za-z]:\/)/, '$1');
+
+    return await new Promise((resolve, reject) => {
+        fs.readFile(filePath, (error, data) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve(data);
+        });
+    });
 }
 
 function getVaultPathResourceUrl(vaultPath: string, vault: Vault): string {

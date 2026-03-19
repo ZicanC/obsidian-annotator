@@ -84,15 +84,18 @@ a {
 #opener,
 #closer,
 .arrow {
+  appearance: none;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
   border: 1px solid var(--reader-border);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
   color: var(--reader-muted);
   cursor: pointer;
+  font: inherit;
   text-decoration: none;
   user-select: none;
 }
@@ -126,8 +129,15 @@ a {
   transform: translateY(1px);
 }
 
-#opener .material-icons,
-#closer .material-icons {
+.reader-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+#opener .reader-icon,
+#closer .reader-icon {
   font-size: 24px;
 }
 
@@ -140,7 +150,7 @@ a {
   z-index: 4;
 }
 
-.arrow .material-icons {
+.arrow .reader-icon {
   font-size: 30px;
 }
 
@@ -234,6 +244,14 @@ a {
 #toc li a.active {
   color: var(--reader-accent);
   font-weight: 600;
+}
+
+#opener:focus-visible,
+#closer:focus-visible,
+.arrow:focus-visible,
+#toc li a:focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 2px;
 }
 
 #hiddenTitle {

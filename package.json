@@ -1,7 +1,7 @@
 {
   "name": "obsidian-annotator",
   "version": "0.2.11",
-  "description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+  "description": "Open and annotate PDF, EPUB, web, and video content from inside Obsidian.",
   "main": "main.js",
   "scripts": {
     "prettier-format": "prettier --config .prettierrc.js src/**/*.tsx --write",

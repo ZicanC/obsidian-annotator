@@ -2,9 +2,17 @@
 ![GitHub All Releases](https://img.shields.io/github/downloads/elias-sundqvist/obsidian-annotator/total?style=for-the-badge)
 # Obsidian Annotator
 
-This is a plugin for Obsidian (https://obsidian.md). It allows you to open and annotate PDF and EPUB files. 
+This is a plugin for Obsidian (https://obsidian.md). It allows you to open and annotate PDF and EPUB files.
 
-The plugin is based on https://web.hypothes.is/, but modified to store the annotations in a local markdown file instead of on the internet. 
+The plugin is based on https://web.hypothes.is/, but modified to store the annotations in a local markdown file instead of on the internet.
+
+## Privacy and disclosures
+
+- The plugin stores annotations in your vault as Markdown files. It does not include telemetry.
+- If you open a remote `annotation-target`, the plugin will request that remote PDF, EPUB, or webpage and any assets that document references.
+- The bundled PDF and EPUB reader shells are shipped with the plugin, but online targets still require network access to the target itself.
+- The optional Annotate.TV integration can fetch a user-provided resource archive URL.
+- On desktop, if you point `annotation-target` to an absolute file path or `file://` URL, the plugin reads that file outside the vault.
 
 ## Demonstration
 ![annotator demo](https://user-images.githubusercontent.com/9102856/131702952-1aa76baa-a279-474c-978d-cec95a683485.gif)

@@ -54,7 +54,6 @@ html,
 body {
     margin: 0 !important;
     padding: 0 !important;
-    color-scheme: light;
     overflow-wrap: break-word;
     word-break: normal;
 }
@@ -292,7 +291,7 @@ class EpubReader {
     configureNavigationEvents(book: epubjs.Book, id: Document, readingMode: 'scroll' | 'pagination') {
         // configure UI arrows
         if (readingMode == 'scroll') {
-            id.querySelectorAll('a.arrow').forEach((e: HTMLElement) => (e.style.display = 'none'));
+            id.querySelectorAll('.arrow').forEach((e: HTMLElement) => (e.style.display = 'none'));
             id.querySelector('#viewer').classList.add('hide-after');
         }
 
@@ -329,8 +328,6 @@ class EpubReader {
 
         book.rendition.on('keyup', keyListener);
         id.addEventListener('keyup', keyListener, false);
-        // to make keys work even when focus outside of reader iframe
-        document.addEventListener('keyup', keyListener, false);
 
         // open/close table of contents
         const nav = id.getElementById('navigation');

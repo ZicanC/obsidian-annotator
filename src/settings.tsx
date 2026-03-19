@@ -62,9 +62,9 @@ export default class AnnotatorSettingsTab extends PluginSettingTab {
 
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Annotator Settings' });
+        new Setting(containerEl).setName('Annotator').setHeading();
 
-        containerEl.createEl('h3', { text: 'Annotation Target Settings' });
+        new Setting(containerEl).setName('Annotation target').setHeading();
 
         new Setting(containerEl)
             .setName('Custom Default Path')
@@ -83,7 +83,7 @@ export default class AnnotatorSettingsTab extends PluginSettingTab {
                 })
             );
 
-        containerEl.createEl('h3', { text: 'Epub Reader Settings' });
+        new Setting(containerEl).setName('EPUB reader').setHeading();
 
         new Setting(containerEl).setName('Epub reader mode').addDropdown(dropdown =>
             dropdown
@@ -114,7 +114,7 @@ export default class AnnotatorSettingsTab extends PluginSettingTab {
                 })
         );
 
-        containerEl.createEl('h3', { text: 'Annotation Markdown Settings' });
+        new Setting(containerEl).setName('Annotation markdown').setHeading();
 
         new Setting(containerEl)
             .setName('Use Annotation Mode By Default')
@@ -168,7 +168,7 @@ export default class AnnotatorSettingsTab extends PluginSettingTab {
                     })
             );
 
-        containerEl.createEl('h3', { text: 'Dark Mode Settings' });
+        new Setting(containerEl).setName('Dark mode').setHeading();
 
         new Setting(containerEl)
             .setName('Use Dark Mode By Default')
@@ -219,7 +219,7 @@ export default class AnnotatorSettingsTab extends PluginSettingTab {
                     })
             );
 
-        containerEl.createEl('h3', { text: 'Annotate.TV settings' });
+        new Setting(containerEl).setName('Annotate.tv').setHeading();
 
         const resourceUrlUpdateDelayer = callDelayer();
 
@@ -237,7 +237,7 @@ export default class AnnotatorSettingsTab extends PluginSettingTab {
                 })
             );
 
-        containerEl.createEl('h3', { text: 'Developer Settings' });
+        new Setting(containerEl).setName('Developer').setHeading();
 
         new Setting(containerEl)
             .setName('Enable Debug Logging')

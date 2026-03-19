@@ -21,28 +21,27 @@
   </script>
   <script src="https://cdn.hypothes.is/hypothesis"></script>
 
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link rel="stylesheet" type="text/css" href="css/reader.css">
 
 </head>
 <body>
   <div id="main">
-    <a id="opener">
-      <i class="material-icons">menu</i>
-    </a>
+    <button id="opener" type="button" aria-label="Open table of contents">
+      <span class="reader-icon" aria-hidden="true">☰</span>
+    </button>
     <div id="viewer" class="spreads loading"></div>
     <span id="hiddenTitle"></span>
-    <a id="prev" href="#prev" class="arrow">
-      <i class="material-icons">chevron_left</i>
-    </a>
-    <a id="next" href="#next" class="arrow">
-      <i class="material-icons">chevron_right</i>
-    </a>
+    <button id="prev" type="button" class="arrow" aria-label="Previous page">
+      <span class="reader-icon" aria-hidden="true">‹</span>
+    </button>
+    <button id="next" type="button" class="arrow" aria-label="Next page">
+      <span class="reader-icon" aria-hidden="true">›</span>
+    </button>
   </div>
   <div id="navigation">
-    <a id="closer">
-      <i class="material-icons">close</i>
-    </a>
+    <button id="closer" type="button" aria-label="Close table of contents">
+      <span class="reader-icon" aria-hidden="true">×</span>
+    </button>
     <h1 id="title">...</h1>
     <img id="cover" width="150" alt="" decoding="async" hidden />
     <h2 id="author">...</h2>
