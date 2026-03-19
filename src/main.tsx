@@ -33,6 +33,11 @@ import stringEncodedResourcesFolder from './resources!zipStringEncoded';
 import * as jszip from 'jszip';
 import SourceViewObserver from 'sourceViewObserver';
 
+function getMarkdownViewFilePath(state: ViewState): string | undefined {
+    const file = Reflect.get(state.state ?? {}, 'file');
+    return typeof file === 'string' ? file : undefined;
+}
+
 export default class AnnotatorPlugin extends Plugin implements IHasAnnotatorSettings {
     static instance: AnnotatorPlugin = null;
     // @ts-ignore: initialized by loadSettings() in onloadImpl()
@@ -331,14 +336,16 @@ export default class AnnotatorPlugin extends Plugin implements IHasAnnotatorSett
 
                 setViewState(next) {
                     return function (state: ViewState, ...rest: unknown[]) {
+                        const markdownFile = getMarkdownViewFilePath(state);
+
                         if (
                             self._loaded &&
                             state.type === 'markdown' &&
-                            state.state?.file &&
-                            self.pdfAnnotatorFileModes[this.id || state.state.file] !== 'markdown' &&
+                            markdownFile &&
+                            self.pdfAnnotatorFileModes[this.id || markdownFile] !== 'markdown' &&
                             self.settings.annotationMarkdownSettings.annotationModeByDefault === true
                         ) {
-                            const file = self.app.vault.getAbstractFileByPath(state.state.file);
+                            const file = self.app.vault.getAbstractFileByPath(markdownFile);
 
                             if (file instanceof TFile && self.getPropertyValue(ANNOTATION_TARGET_PROPERTY, file)) {
                                 const newState = {
@@ -346,7 +353,7 @@ export default class AnnotatorPlugin extends Plugin implements IHasAnnotatorSett
                                     type: VIEW_TYPE_PDF_ANNOTATOR
                                 };
 
-                                self.pdfAnnotatorFileModes[state.state.file] = VIEW_TYPE_PDF_ANNOTATOR;
+                                self.pdfAnnotatorFileModes[markdownFile] = VIEW_TYPE_PDF_ANNOTATOR;
 
                                 return next.apply(this, [newState, ...rest]);
                             }

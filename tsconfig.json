@@ -11,6 +11,10 @@
     "esModuleInterop":true,
     "importHelpers": true,
     "noEmit": true,
+    "types": [
+      "node",
+      "jest"
+    ],
     "allowSyntheticDefaultImports": true,
     "lib": [
       "dom",

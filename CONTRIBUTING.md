@@ -12,16 +12,18 @@ Feel free to pick up any existing issue that looks interesting to you, or fix a 
 
 You'll want to install the following on your machine:
 - [NodeJS](https://nodejs.org/en/download/)
-- [Yarn](https://yarnpkg.com/) *required by submodule*
+- [Yarn](https://yarnpkg.com/) *required only when rebuilding the hypothesis submodule*
 - It also possible to use [pnpm](https://pnpm.js.org) instead of `npm`
 
-### Clone with SUBMODULE
+### Clone with SUBMODULE (optional)
 
 ```bash
 git clone git@github.com:elias-sundqvist/obsidian-annotator.git
 git submodule init
 git submodule update
 ```
+
+You only need the submodule when you want to rebuild the vendored Hypothesis assets. The repository already includes a prebuilt copy under `resources/cdn.hypothes.is/hypothesis/build`, and the default build reuses it when the submodule is not initialized.
 
 ### Download dependencies
 
@@ -37,7 +39,7 @@ Run `npm install` to download all necessary dependencies.
 
 ### Building
 
-1. `npm run build` – builds `hypothesis` submodule and `obsidian-annotator`
+1. `npm run build` – builds `obsidian-annotator`, and rebuilds the `hypothesis` submodule only when it is initialized
 2. `npm run quick-build` – builds only `obsidian-annotator`
 3. `npm run build-hypothesis` - build only `hypothesis` submodule
 
