@@ -26,9 +26,13 @@ export default (vault: Vault, plugin: AnnotatorPlugin) => {
                     while (iframe?.contentDocument?.body?.innerHTML == '') {
                         await wait(50);
                     }
+                    if (iframe.dataset.annotatorEpubReaderStarted == 'true') {
+                        return;
+                    }
+                    iframe.dataset.annotatorEpubReaderStarted = 'true';
 
                     const epubReader = new EpubReader(plugin.settings.epubSettings);
-                    iframe.contentDocument.addEventListener('DOMContentLoaded', epubReader.start(iframe), false);
+                    void epubReader.start(iframe);
                 }}
             />
         );
@@ -45,21 +49,78 @@ interface ScrollToRange extends Event {
     detail?: Range;
 }
 
+const EPUB_CONTENT_STYLE = `
+html,
+body {
+    margin: 0 !important;
+    padding: 0 !important;
+    color-scheme: light;
+    overflow-wrap: break-word;
+    word-break: normal;
+}
+
+body {
+    line-height: 1.65;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+}
+
+p,
+li,
+blockquote,
+dd {
+    line-height: 1.65;
+}
+
+img,
+svg,
+video,
+canvas {
+    display: block;
+    max-width: 100% !important;
+    height: auto !important;
+    margin-left: auto;
+    margin-right: auto;
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+figure,
+table,
+pre,
+blockquote {
+    max-width: 100% !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+pre {
+    white-space: pre-wrap !important;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+`;
+
 class EpubReader {
     readonly bookUrl: string;
     readonly settings: AnnotatorSettings['epubSettings'];
+    initialRenderPending = false;
+    initialRenderSettled = false;
     readonly readingModes = {
-        scroll: { manager: 'continuous', flow: 'scrolled' },
-        pagination: { manager: 'default', flow: 'paginated' }
+        scroll: { manager: 'continuous', flow: 'scrolled-doc', spread: 'none', minSpreadWidth: 0 },
+        pagination: { manager: 'default', flow: 'paginated', spread: 'auto', minSpreadWidth: 1400, gap: 56 }
     };
+    relayoutTimer: number | null = null;
 
     constructor(epubSettings: AnnotatorSettings['epubSettings']) {
         this.bookUrl = SAMPLE_EPUB_URL;
         this.settings = epubSettings;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    start(iframe: HTMLIFrameElement): any {
+    async start(iframe: HTMLIFrameElement): Promise<void> {
         const id = iframe.contentDocument;
 
         // linter says it's possible that iframe would be null
@@ -70,10 +131,17 @@ class EpubReader {
 
         this.configureNavigationEvents(book, id, this.settings.readingMode);
         this.addBookMetaToUI(book, iframe);
-        book.rendition.on('rendered', (section: SpineItem) => this.renderedHook(book, id, section));
+        book.rendition.on('rendered', (section: SpineItem, view?: { document?: Document; contents?: epubjs.Contents }) =>
+            this.renderedHook(book, id, section, view)
+        );
 
-        book.rendition.display();
-        book.ready.then(() => this.removeLoader(id));
+        await book.rendition.display();
+        void book.ready.then(async () => {
+            await wait(2000);
+            if (!this.initialRenderSettled) {
+                this.removeLoader(id);
+            }
+        });
     }
 
     initBook(id: Document, iw: readerWindow): epubjs.Book {
@@ -95,15 +163,12 @@ class EpubReader {
         });
 
         book.rendition.themes.fontSize(`${this.settings.fontSize}%`);
-        book.rendition.on('relocated', () => {
-            book.rendition.themes.fontSize(`${this.settings.fontSize}%`);
-        });
 
         iw.rendition = book.rendition;
         return book;
     }
 
-    renderedHook(book: epubjs.Book, id: Document, section: SpineItem) {
+    renderedHook(book: epubjs.Book, id: Document, section: SpineItem, view?: { document?: Document; contents?: epubjs.Contents }) {
         const current = book.navigation && book.navigation.get(section.href);
 
         if (current) {
@@ -126,6 +191,11 @@ class EpubReader {
             if (active) {
                 active.classList.add('active');
             }
+        }
+
+        if (!this.initialRenderPending && !this.initialRenderSettled) {
+            this.initialRenderPending = true;
+            void this.finishInitialRender(book, id, view?.document ?? view?.contents?.document);
         }
     }
 
@@ -169,19 +239,42 @@ class EpubReader {
         // add cover to table of contents
         book.loaded.cover.then((cover: string) => {
             const coverImgEl = iframe.contentDocument.getElementById('cover') as HTMLImageElement;
+            coverImgEl.alt = 'Book cover';
 
-            if (cover) {
-                if (book.archive) {
-                    book.archive.createUrl(cover, { base64: false }).then(url => {
+            if (!cover) {
+                coverImgEl.hidden = true;
+                return;
+            }
+
+            coverImgEl.hidden = false;
+            if (book.archive) {
+                book.archive
+                    .createUrl(cover, { base64: false })
+                    .then(url => {
                         coverImgEl.src = url;
+                    })
+                    .catch(() => {
+                        coverImgEl.hidden = true;
                     });
-                } else {
-                    coverImgEl.src = cover;
-                }
+            } else {
+                coverImgEl.src = cover;
             }
         });
 
-        book.rendition.hooks.content.register(function (contents: epubjs.Contents) {
+        book.rendition.hooks.content.register((contents: epubjs.Contents) => {
+            const contentDocument = contents.document;
+            if (!contentDocument) {
+                return;
+            }
+
+            this.applyContentStyles(contentDocument);
+            this.watchContentAssets(contentDocument, () => this.scheduleRelayout(book));
+            if (contentDocument.fonts && contentDocument.fonts.status != 'loaded') {
+                void contentDocument.fonts.ready
+                    .then(() => this.scheduleRelayout(book))
+                    .catch(() => undefined);
+            }
+
             contents.window.addEventListener('scrolltorange', function (e: ScrollToRange) {
                 if (e.detail === undefined) return;
 
@@ -262,4 +355,69 @@ class EpubReader {
     removeLoader = (id: Document) => {
         id.getElementById('viewer').classList.remove('loading');
     };
+
+    applyContentStyles(id: Document) {
+        if (id.getElementById('annotator-epub-content-style')) {
+            return;
+        }
+
+        const style = id.createElement('style');
+        style.id = 'annotator-epub-content-style';
+        style.textContent = EPUB_CONTENT_STYLE;
+        (id.head || id.documentElement).appendChild(style);
+    }
+
+    watchContentAssets(id: Document, onAssetStateChanged: () => void) {
+        const images = Array.from(id.images);
+        images.forEach(image => {
+            if (image.complete) {
+                return;
+            }
+
+            image.addEventListener('load', onAssetStateChanged, { once: true });
+            image.addEventListener('error', onAssetStateChanged, { once: true });
+        });
+    }
+
+    scheduleRelayout(book: epubjs.Book) {
+        if (this.relayoutTimer != null) {
+            window.clearTimeout(this.relayoutTimer);
+        }
+
+        this.relayoutTimer = window.setTimeout(() => {
+            this.relayoutTimer = null;
+            (book.rendition as epubjs.Rendition & { resize?: () => void }).resize?.();
+        }, 120);
+    }
+
+    async finishInitialRender(book: epubjs.Book, id: Document, contentDocument?: Document) {
+        try {
+            if (contentDocument) {
+                const pendingImages = Array.from(contentDocument.images).filter(image => !image.complete);
+                const pendingAssets: Promise<void>[] = pendingImages.map(
+                    image =>
+                        new Promise(resolve => {
+                            image.addEventListener('load', () => resolve(), { once: true });
+                            image.addEventListener('error', () => resolve(), { once: true });
+                        })
+                );
+
+                if (contentDocument.fonts && contentDocument.fonts.status != 'loaded') {
+                    pendingAssets.push(contentDocument.fonts.ready.then(() => undefined).catch(() => undefined));
+                }
+
+                if (pendingAssets.length > 0) {
+                    await Promise.all(pendingAssets);
+                }
+            }
+        } finally {
+            this.initialRenderPending = false;
+        }
+
+        this.initialRenderSettled = true;
+        requestAnimationFrame(() => {
+            this.scheduleRelayout(book);
+            requestAnimationFrame(() => this.removeLoader(id));
+        });
+    }
 }
