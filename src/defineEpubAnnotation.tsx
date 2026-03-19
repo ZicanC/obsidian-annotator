@@ -44,6 +44,33 @@ interface readerWindow extends Window {
     rendition?: epubjs.Rendition;
 }
 
+type HypothesisSidebarLayoutState = {
+    expanded?: boolean;
+    width?: number;
+    toolbarWidth?: number;
+};
+
+type RenditionManager = {
+    isPaginated?: boolean;
+    container?: HTMLElement;
+    layout?: {
+        delta?: number;
+        divisor?: number;
+    };
+    settings?: {
+        axis?: 'horizontal' | 'vertical';
+        direction?: 'ltr' | 'rtl';
+        rtlScrollType?: 'default' | string;
+    };
+    views?: {
+        length?: number;
+        displayed?: () => Array<{
+            document?: Document;
+            contents?: { document?: Document };
+        }>;
+    };
+};
+
 // hypothes.is custom event
 interface ScrollToRange extends Event {
     detail?: Range;
@@ -106,11 +133,14 @@ table {
 class EpubReader {
     readonly bookUrl: string;
     readonly settings: AnnotatorSettings['epubSettings'];
+    readonly viewerAspectRatio = 16 / 10;
+    readonly paginationMinSpreadWidth = 1280;
     initialRenderPending = false;
     initialRenderSettled = false;
+    activeNavigationId = 0;
     readonly readingModes = {
         scroll: { manager: 'continuous', flow: 'scrolled-doc', spread: 'none', minSpreadWidth: 0 },
-        pagination: { manager: 'default', flow: 'paginated', spread: 'auto', minSpreadWidth: 1400, gap: 56 }
+        pagination: { manager: 'default', flow: 'paginated', spread: 'auto', minSpreadWidth: 1280, gap: 56 }
     };
     relayoutTimer: number | null = null;
 
@@ -127,12 +157,18 @@ class EpubReader {
         const iw: readerWindow | null = iframe.contentWindow;
 
         const book = this.initBook(id, iw);
+        this.bindLayoutObservers(book, id, iw, iframe);
 
+        this.syncSpreadMode(book, id);
+        this.updateViewerLayoutState(book, id);
         this.configureNavigationEvents(book, id, this.settings.readingMode);
-        this.addBookMetaToUI(book, iframe);
+        this.addBookMetaToUI(book, id);
         book.rendition.on('rendered', (section: SpineItem, view?: { document?: Document; contents?: epubjs.Contents }) =>
             this.renderedHook(book, id, section, view)
         );
+        book.rendition.on('resized', () => {
+            this.updateViewerLayoutState(book, id);
+        });
 
         await book.rendition.display();
         void book.ready.then(async () => {
@@ -168,6 +204,8 @@ class EpubReader {
     }
 
     renderedHook(book: epubjs.Book, id: Document, section: SpineItem, view?: { document?: Document; contents?: epubjs.Contents }) {
+        this.syncSpreadMode(book, id);
+        this.updateViewerLayoutState(book, id);
         const current = book.navigation && book.navigation.get(section.href);
 
         if (current) {
@@ -198,17 +236,17 @@ class EpubReader {
         }
     }
 
-    addBookMetaToUI(book: epubjs.Book, iframe: HTMLIFrameElement) {
+    addBookMetaToUI(book: epubjs.Book, id: Document) {
         // add chapters to table of contents
         book.loaded.navigation
             .then((nav: Navigation): void => {
-                const toc = iframe.contentDocument.getElementById('toc'),
-                    docfrag = iframe.contentDocument.createDocumentFragment();
+                const toc = id.getElementById('toc'),
+                    docfrag = id.createDocumentFragment();
 
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 nav.forEach((chapter: epubjs.NavItem): any => {
-                    const item = iframe.contentDocument.createElement('li');
-                    const link = iframe.contentDocument.createElement('a');
+                    const item = id.createElement('li');
+                    const link = id.createElement('a');
 
                     link.id = 'chap-' + chapter.id;
                     link.textContent = chapter.label;
@@ -218,7 +256,7 @@ class EpubReader {
 
                     link.onclick = () => {
                         const url = link.getAttribute('href');
-                        book.rendition.display(url);
+                        void this.displaySection(book, id, url);
                         return false;
                     };
                 });
@@ -231,13 +269,13 @@ class EpubReader {
 
         // add title and author to table of contents
         book.loaded.metadata.then(function (meta: PackagingMetadataObject) {
-            iframe.contentDocument.getElementById('title').textContent = meta.title;
-            iframe.contentDocument.getElementById('author').textContent = meta.creator;
+            id.getElementById('title').textContent = meta.title;
+            id.getElementById('author').textContent = meta.creator;
         });
 
         // add cover to table of contents
         book.loaded.cover.then((cover: string) => {
-            const coverImgEl = iframe.contentDocument.getElementById('cover') as HTMLImageElement;
+            const coverImgEl = id.getElementById('cover') as HTMLImageElement;
             coverImgEl.alt = 'Book cover';
 
             if (!cover) {
@@ -281,7 +319,7 @@ class EpubReader {
                 const cfi = new epubjs.EpubCFI(range, contents.cfiBase).toString();
 
                 if (cfi) {
-                    book.rendition.display(cfi);
+                    void this.displaySection(book, id, cfi);
                 }
                 e.preventDefault();
             });
@@ -297,8 +335,8 @@ class EpubReader {
 
         id.getElementById('next').addEventListener(
             'click',
-            function (e: Event) {
-                book.rendition.next();
+            (e: Event) => {
+                void this.navigate(book, id, 'next');
                 e.preventDefault();
             },
             false
@@ -306,23 +344,23 @@ class EpubReader {
 
         id.getElementById('prev').addEventListener(
             'click',
-            function (e: Event) {
-                book.rendition.prev();
+            (e: Event) => {
+                void this.navigate(book, id, 'prev');
                 e.preventDefault();
             },
             false
         );
 
         // turn pages by arrow buttons
-        const keyListener = function (e: KeyboardEvent) {
+        const keyListener = (e: KeyboardEvent) => {
             // Left Key
             if ((e.keyCode || e.which) == 37) {
-                book.rendition.prev();
+                void this.navigate(book, id, 'prev');
             }
 
             // Right Key
             if ((e.keyCode || e.which) == 39) {
-                book.rendition.next();
+                void this.navigate(book, id, 'next');
             }
         };
 
@@ -352,6 +390,282 @@ class EpubReader {
     removeLoader = (id: Document) => {
         id.getElementById('viewer').classList.remove('loading');
     };
+
+    bindLayoutObservers(book: epubjs.Book, id: Document, iw: readerWindow, iframe: HTMLIFrameElement) {
+        const relayout = () => {
+            void this.waitForAnimationFrames(2).then(() => {
+                this.syncSpreadMode(book, id);
+                this.scheduleRelayout(book);
+                requestAnimationFrame(() => this.updateViewerLayoutState(book, id));
+            });
+        };
+
+        const viewer = id.getElementById('viewer');
+        iw.addEventListener('resize', relayout);
+        iw.addEventListener('annotator-sidebar-layoutchange', (_event: Event) => {
+            const sidebarEvent = _event as CustomEvent<HypothesisSidebarLayoutState>;
+            if (!sidebarEvent.detail?.expanded) {
+                relayout();
+                return;
+            }
+
+            relayout();
+        });
+        let lastViewerWidth = Math.round(viewer?.getBoundingClientRect().width || 0);
+        let lastViewerHeight = Math.round(viewer?.getBoundingClientRect().height || 0);
+        let lastIframeWidth = iframe.clientWidth;
+        let lastIframeHeight = iframe.clientHeight;
+
+        const intervalId = iw.setInterval(() => {
+            const nextViewerWidth = Math.round(viewer?.getBoundingClientRect().width || 0);
+            const nextViewerHeight = Math.round(viewer?.getBoundingClientRect().height || 0);
+            const nextIframeWidth = iframe.clientWidth;
+            const nextIframeHeight = iframe.clientHeight;
+
+            if (
+                nextViewerWidth == lastViewerWidth &&
+                nextViewerHeight == lastViewerHeight &&
+                nextIframeWidth == lastIframeWidth &&
+                nextIframeHeight == lastIframeHeight
+            ) {
+                return;
+            }
+
+            lastViewerWidth = nextViewerWidth;
+            lastViewerHeight = nextViewerHeight;
+            lastIframeWidth = nextIframeWidth;
+            lastIframeHeight = nextIframeHeight;
+            relayout();
+        }, 150);
+
+        const disconnectObservers = () => {
+            iw.clearInterval(intervalId);
+        };
+
+        iw.addEventListener('unload', disconnectObservers, { once: true });
+    }
+
+    setViewerPreparing(id: Document, preparing: boolean) {
+        id.getElementById('viewer')?.classList.toggle('preparing', preparing);
+    }
+
+    syncSpreadMode(book: epubjs.Book, id: Document) {
+        if (this.settings.readingMode != 'pagination') {
+            return;
+        }
+
+        const viewerWidth = this.getPaginationViewerMetrics(id)?.layoutWidth || 0;
+        const spreadMode = viewerWidth >= this.paginationMinSpreadWidth ? 'auto' : 'none';
+        const rendition = book.rendition as epubjs.Rendition & { spread?: (spread: string, min?: number) => void };
+
+        rendition.spread?.(spreadMode, this.paginationMinSpreadWidth);
+    }
+
+    updateViewerLayoutState(book: epubjs.Book, id: Document) {
+        this.syncPaginationViewerScale(id);
+        const manager = this.getManager(book);
+        const viewer = id.getElementById('viewer') as HTMLElement | null;
+        const isTwoUp = this.settings.readingMode == 'pagination' && manager?.layout?.divisor == 2;
+
+        viewer?.classList.toggle('is-two-up', isTwoUp);
+    }
+
+    syncPaginationViewerScale(id: Document) {
+        const stage = id.getElementById('reader-stage') as HTMLElement | null;
+        const viewer = id.getElementById('viewer') as HTMLElement | null;
+        const isPagination = this.settings.readingMode == 'pagination';
+
+        stage?.classList.toggle('is-pagination-mode', isPagination);
+        viewer?.classList.toggle('is-pagination-mode', isPagination);
+
+        if (!stage || !viewer) {
+            return;
+        }
+
+        if (!isPagination) {
+            stage.style.width = '';
+            viewer.style.width = '';
+            viewer.style.height = '';
+            viewer.style.transform = '';
+            return;
+        }
+
+        const metrics = this.getPaginationViewerMetrics(id);
+        if (!metrics) {
+            return;
+        }
+
+        const { layoutWidth, visibleWidth, scale } = metrics;
+        stage.style.width = `${visibleWidth}px`;
+        viewer.style.width = `${layoutWidth}px`;
+        viewer.style.height = `${layoutWidth / this.viewerAspectRatio}px`;
+        viewer.style.transform = `translateX(-50%) scale(${scale})`;
+    }
+
+    getPaginationViewerMetrics(id: Document) {
+        if (this.settings.readingMode != 'pagination') {
+            return null;
+        }
+
+        const iw = id.defaultView;
+        if (!iw) {
+            return null;
+        }
+
+        const rootStyles = iw.getComputedStyle(id.documentElement);
+        const gutterX = this.readCssPx(rootStyles.getPropertyValue('--reader-gutter-x'), 72);
+        const gutterY = this.readCssPx(rootStyles.getPropertyValue('--reader-gutter-y'), 16);
+        const bottomGutter = this.readCssPx(rootStyles.getPropertyValue('--reader-bottom-gutter'), 24);
+        const sidebarWidth = this.readCssPx(rootStyles.getPropertyValue('--hypothesis-sidebar-width'), 0);
+        const maxWidthByHeight = Math.max(0, (iw.innerHeight - gutterY - bottomGutter) * this.viewerAspectRatio);
+        const layoutWidth = Math.max(0, Math.min(maxWidthByHeight, iw.innerWidth - gutterX * 2));
+        const visibleWidth = Math.max(0, Math.min(maxWidthByHeight, iw.innerWidth - gutterX * 2 - sidebarWidth));
+        const scale = layoutWidth > 0 ? Math.min(1, visibleWidth / layoutWidth) : 1;
+
+        return {
+            layoutWidth,
+            visibleWidth,
+            scale
+        };
+    }
+
+    readCssPx(value: string, fallback: number) {
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    getManager(book: epubjs.Book): RenditionManager | undefined {
+        return (book.rendition as epubjs.Rendition & { manager?: RenditionManager }).manager;
+    }
+
+    async displaySection(book: epubjs.Book, id: Document, target: string) {
+        await this.runPrerenderedNavigation(book, id, () => book.rendition.display(target));
+    }
+
+    async navigate(book: epubjs.Book, id: Document, direction: 'next' | 'prev') {
+        if (this.shouldPrerenderNavigation(book, direction)) {
+            await this.runPrerenderedNavigation(book, id, () => book.rendition[direction]());
+            return;
+        }
+
+        await book.rendition[direction]();
+    }
+
+    shouldPrerenderNavigation(book: epubjs.Book, direction: 'next' | 'prev') {
+        if (this.settings.readingMode != 'pagination') {
+            return false;
+        }
+
+        const manager = this.getManager(book);
+        const container = manager?.container;
+        const delta = manager?.layout?.delta;
+        const axis = manager?.settings?.axis;
+        const dir = manager?.settings?.direction;
+        const rtlScrollType = manager?.settings?.rtlScrollType;
+
+        if (!manager?.isPaginated || !container || !delta) {
+            return true;
+        }
+
+        if (axis == 'vertical') {
+            if (direction == 'next') {
+                return container.scrollTop + container.offsetHeight >= container.scrollHeight;
+            }
+
+            return container.scrollTop <= 0;
+        }
+
+        if (dir == 'rtl') {
+            if (rtlScrollType == 'default') {
+                if (direction == 'next') {
+                    return container.scrollLeft <= 0;
+                }
+
+                return container.scrollLeft + container.offsetWidth >= container.scrollWidth;
+            }
+
+            if (direction == 'next') {
+                return container.scrollLeft + delta * -1 <= container.scrollWidth * -1;
+            }
+
+            return container.scrollLeft >= 0;
+        }
+
+        if (direction == 'next') {
+            return container.scrollLeft + container.offsetWidth + delta > container.scrollWidth;
+        }
+
+        return container.scrollLeft <= 0;
+    }
+
+    async runPrerenderedNavigation(book: epubjs.Book, id: Document, action: () => Promise<void> | void) {
+        const navigationId = ++this.activeNavigationId;
+        this.setViewerPreparing(id, true);
+
+        try {
+            await action();
+            await this.waitForDisplayedViews(book, 1200);
+            this.scheduleRelayout(book);
+            await this.waitForAnimationFrames(2);
+            this.updateViewerLayoutState(book, id);
+        } finally {
+            if (navigationId == this.activeNavigationId) {
+                this.setViewerPreparing(id, false);
+                this.removeLoader(id);
+            }
+        }
+    }
+
+    async waitForDisplayedViews(book: epubjs.Book, maxWaitMs: number) {
+        const manager = this.getManager(book);
+        const displayedViews = manager?.views?.displayed?.() || [];
+        const uniqueDocuments = [...new Set(displayedViews.map(view => view.document || view.contents?.document).filter(x => x))];
+
+        if (uniqueDocuments.length == 0) {
+            await this.waitForAnimationFrames(2);
+            return;
+        }
+
+        await Promise.all(uniqueDocuments.map(doc => this.waitForDocumentToSettle(doc, maxWaitMs)));
+    }
+
+    async waitForDocumentToSettle(contentDocument: Document, maxWaitMs: number) {
+        const pendingAssets: Promise<void>[] = Array.from(contentDocument.images)
+            .filter(image => !image.complete)
+            .map(
+                image =>
+                    new Promise(resolve => {
+                        image.addEventListener('load', () => resolve(), { once: true });
+                        image.addEventListener('error', () => resolve(), { once: true });
+                    })
+            );
+
+        if (contentDocument.fonts && contentDocument.fonts.status != 'loaded') {
+            pendingAssets.push(contentDocument.fonts.ready.then(() => undefined).catch(() => undefined));
+        }
+
+        if (pendingAssets.length == 0) {
+            await this.waitForAnimationFrames(1);
+            return;
+        }
+
+        await Promise.race([Promise.all(pendingAssets.map(asset => asset.catch(() => undefined))), wait(maxWaitMs)]);
+    }
+
+    waitForAnimationFrames(frameCount: number) {
+        return new Promise<void>(resolve => {
+            const step = (remainingFrames: number) => {
+                if (remainingFrames <= 0) {
+                    resolve();
+                    return;
+                }
+
+                requestAnimationFrame(() => step(remainingFrames - 1));
+            };
+
+            step(frameCount);
+        });
+    }
 
     applyContentStyles(id: Document) {
         if (id.getElementById('annotator-epub-content-style')) {
@@ -390,22 +704,7 @@ class EpubReader {
     async finishInitialRender(book: epubjs.Book, id: Document, contentDocument?: Document) {
         try {
             if (contentDocument) {
-                const pendingImages = Array.from(contentDocument.images).filter(image => !image.complete);
-                const pendingAssets: Promise<void>[] = pendingImages.map(
-                    image =>
-                        new Promise(resolve => {
-                            image.addEventListener('load', () => resolve(), { once: true });
-                            image.addEventListener('error', () => resolve(), { once: true });
-                        })
-                );
-
-                if (contentDocument.fonts && contentDocument.fonts.status != 'loaded') {
-                    pendingAssets.push(contentDocument.fonts.ready.then(() => undefined).catch(() => undefined));
-                }
-
-                if (pendingAssets.length > 0) {
-                    await Promise.all(pendingAssets);
-                }
+                await this.waitForDocumentToSettle(contentDocument, 1800);
             }
         } finally {
             this.initialRenderPending = false;
@@ -414,7 +713,10 @@ class EpubReader {
         this.initialRenderSettled = true;
         requestAnimationFrame(() => {
             this.scheduleRelayout(book);
-            requestAnimationFrame(() => this.removeLoader(id));
+            requestAnimationFrame(() => {
+                this.updateViewerLayoutState(book, id);
+                this.removeLoader(id);
+            });
         });
     }
 }

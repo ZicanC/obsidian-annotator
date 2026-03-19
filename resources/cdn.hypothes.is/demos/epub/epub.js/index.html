@@ -12,9 +12,18 @@
         enableMultiFrameSupport: true,
         onLayoutChange: function(state) {
           var nav = document.getElementById("navigation");
+          var root = document.documentElement;
+          var isExpanded = !!(state && state.expanded);
+          var sidebarWidth = isExpanded && state && typeof state.width === "number" ? state.width : 0;
+
+          root.style.setProperty("--hypothesis-sidebar-width", sidebarWidth + "px");
+          document.body.classList.toggle("is-hypothesis-expanded", isExpanded);
+
           if (state.expanded === true) {
             nav.classList.remove("open");
           }
+
+          window.dispatchEvent(new CustomEvent("annotator-sidebar-layoutchange", { detail: state }));
         }
       };
     };
@@ -26,17 +35,19 @@
 </head>
 <body>
   <div id="main">
-    <button id="opener" type="button" aria-label="Open table of contents">
-      <span class="reader-icon" aria-hidden="true">☰</span>
-    </button>
-    <div id="viewer" class="spreads loading"></div>
-    <span id="hiddenTitle"></span>
-    <button id="prev" type="button" class="arrow" aria-label="Previous page">
-      <span class="reader-icon" aria-hidden="true">‹</span>
-    </button>
-    <button id="next" type="button" class="arrow" aria-label="Next page">
-      <span class="reader-icon" aria-hidden="true">›</span>
-    </button>
+    <div id="reader-stage">
+      <button id="opener" type="button" aria-label="Open table of contents">
+        <span class="reader-icon" aria-hidden="true">☰</span>
+      </button>
+      <div id="viewer" class="spreads loading"></div>
+      <span id="hiddenTitle"></span>
+      <button id="prev" type="button" class="arrow" aria-label="Previous page">
+        <span class="reader-icon" aria-hidden="true">‹</span>
+      </button>
+      <button id="next" type="button" class="arrow" aria-label="Next page">
+        <span class="reader-icon" aria-hidden="true">›</span>
+      </button>
+    </div>
   </div>
   <div id="navigation">
     <button id="closer" type="button" aria-label="Close table of contents">

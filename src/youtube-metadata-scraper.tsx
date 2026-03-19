@@ -1,4 +1,5 @@
-import * as cheerio from 'cheerio';
+// Avoid Cheerio's default entrypoint, which pulls in Node-only `undici` code.
+import * as cheerio from 'cheerio/slim';
 
 type YoutubeMetaData = {
     title: string;
